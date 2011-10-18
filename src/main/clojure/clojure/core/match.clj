@@ -145,7 +145,6 @@
 (defmulti test-with-size-inline (fn [t & r] t))
 (defmulti count-inline (fn [t & r] t))
 (defmulti nth-inline (fn [t & r] t))
-(defmulti nth-offset-inline (fn [t & r] t))
 (defmulti nthnext-inline (fn ([t & r] t)))
 
 (defmethod check-size? :default
@@ -177,10 +176,6 @@
 
 (defmethod nth-inline ::vector
   [_ ocr i] `(nth ~ocr ~i))
-
-(defmethod nth-offset-inline ::vector
-  [t ocr i offset]
-  (nth-inline t ocr (+ i offset)))
 
 (defmethod nthnext-inline ::vector
   ([_ ocr start] `(nthnext ~ocr ~start)))
@@ -1036,16 +1031,15 @@
 (defprotocol IVectorPattern
   (size [this])
   (rest? [this])
-  (offset [this])
   (split [this n]))
 
 (declare vector-pattern?)
 
-(deftype VectorPattern [v t size offset rest? _meta]
+(deftype VectorPattern [v t size rest? _meta]
   clojure.lang.IObj
   (meta [_] _meta)
   (withMeta [_ new-meta]
-    (VectorPattern. v t size offset rest? new-meta))
+    (VectorPattern. v t size rest? new-meta))
   IPatternCompile
   (to-source* [_ ocr]
     (if (and (not rest?) size (check-size? t))
@@ -1059,17 +1053,16 @@
   IVectorPattern
   (size [_] size)
   (rest? [_] rest?)
-  (offset [_] offset)
   (split [this n]
     (let [lv (subvec v 0 n)
           rv (subvec v n)
-          pl (VectorPattern. lv t n offset false _meta)
+          pl (VectorPattern. lv t n false _meta)
           pr (if (rest-pattern? (first rv))
                (let [^RestPattern p (first rv)] (.p p))
                (let [rest? (some rest-pattern? rv)
                      rvc (count rv)
                      size (if rest? (dec rvc) rvc)]
-                (VectorPattern. rv t size n rest? _meta)))]
+                (VectorPattern. rv t size rest? _meta)))]
       [pl pr]))
   ISpecializeMatrix
   (specialize-matrix [this rows ocrs]
@@ -1125,17 +1118,15 @@
       matrix)))
 
 (defn ^VectorPattern vector-pattern
-  ([] (vector-pattern [] ::vector nil nil))
+  ([] (vector-pattern [] ::vector nil))
   ([v]
-     (vector-pattern v ::vector nil nil))
+     (vector-pattern v ::vector nil))
   ([v t]
-     (vector-pattern v t nil nil nil))
-  ([v t offset]
-     (vector-pattern v t offset nil))
-  ([v t offset rest?] {:pre [(vector? v)]}
+     (vector-pattern v t nil))
+  ([v t rest?] {:pre [(vector? v)]}
      (let [c (count v)
            size (if rest? (dec c) c)]
-      (VectorPattern. v t size offset rest? nil))))
+      (VectorPattern. v t size rest? nil))))
 
 (defn vector-pattern? [x]
   (instance? VectorPattern x))
@@ -1388,8 +1379,8 @@
       (seq-pattern (emit-patterns p :seq)))))
 
 (defmethod emit-pattern-for-syntax ::vector
-  [[p t offset-key offset]] (let [ps (emit-patterns p :vector)]
-                              (vector-pattern ps t offset (some rest-pattern? ps))))
+  [[p t]] (let [ps (emit-patterns p :vector)]
+            (vector-pattern ps t (some rest-pattern? ps))))
 
 (defmethod emit-pattern-for-syntax :only
   [[p _ only]] (with-meta (emit-pattern p) {:only only}))
