@@ -1034,6 +1034,9 @@
 ;; -----------------------------------------------------------------------------
 
 (defprotocol IVectorPattern
+  (size [this])
+  (rest? [this])
+  (offset [this])
   (split [this n]))
 
 (declare vector-pattern?)
@@ -1054,6 +1057,9 @@
   IContainsRestPattern
   (contains-rest-pattern? [_] rest?)
   IVectorPattern
+  (size [_] size)
+  (rest? [_] rest?)
+  (offset [_] offset)
   (split [this n]
     (let [lv (subvec v 0 n)
           rv (subvec v n)
@@ -1072,10 +1078,10 @@
           [rest? min-size] (->> rows
                                 (reduce (fn [[rest? min-size] [p & ps]]
                                           (if (vector-pattern? p)
-                                            [(or rest? (.rest? ^VectorPattern p))
-                                             (min min-size (.size ^VectorPattern p))]
+                                            [(or rest? (rest? ^VectorPattern p))
+                                             (min min-size (size  p))]
                                             [rest? min-size]))
-                                        [false (.size ^VectorPattern fp)]))
+                                        [false (size ^VectorPattern fp)]))
           [nrows nocrs] (if rest?
                           [(->> rows
                                 (map (fn [row]
@@ -1279,9 +1285,9 @@
 
 (defmethod pattern-compare [VectorPattern VectorPattern]
   [^VectorPattern a ^VectorPattern b]
-  (if (or (= (.size a) (.size b))
-          (and (.rest? a) (<= (.size a) (.size b)))
-          (and (.rest? b) (<= (.size b) (.size a))))
+  (if (or (= (size a) (size b))
+          (and (rest? a) (<= (size a) (size b)))
+          (and (rest? b) (<= (size b) (size a))))
     0 1))
 
 ;; =============================================================================
