@@ -146,7 +146,7 @@
 (defmulti count-inline (fn [t & r] t))
 (defmulti nth-inline (fn [t & r] t))
 (defmulti nth-offset-inline (fn [t & r] t))
-(defmulti subvec-inline (fn ([t & r] t)))
+(defmulti nthnext-inline (fn ([t & r] t)))
 
 (defmethod check-size? :default
   [_] true)
@@ -155,7 +155,7 @@
   [t] (throw (Exception. (str "No tag specified for vector specialization " t))))
 
 (defmethod tag ::vector
-  [_] clojure.lang.IPersistentVector)
+  [_] clojure.lang.Counted)
 
 (defn with-tag [t ocr]
   (let [the-tag (tag t)
@@ -166,7 +166,7 @@
 
 (defmethod test-inline ::vector
   [t ocr] (if (= t ::vector)
-           `(vector? ~ocr)
+           `(counted? ~ocr)
            `(instance? ~(tag t) ~ocr)))
 
 (defmethod test-with-size-inline ::vector
@@ -180,11 +180,10 @@
 
 (defmethod nth-offset-inline ::vector
   [t ocr i offset]
-  (nth-inline t ocr i))
+  (nth-inline t ocr (+ i offset)))
 
-(defmethod subvec-inline ::vector
-  ([_ ocr start] `(subvec ~ocr ~start))
-  ([_ ocr start end] `(subvec ~ocr ~start ~end)))
+(defmethod nthnext-inline ::vector
+  ([_ ocr start] `(nthnext ~ocr ~start)))
 
 ;; =============================================================================
 ;; # Extensions and Protocols
@@ -1092,10 +1091,10 @@
                                            :vec-sym vec-ocr}
                                  vl-ocr (gensym (str (name vec-ocr) "_left__"))
                                  vl-ocr (with-meta vl-ocr
-                                          (assoc ocr-meta :bind-expr (subvec-inline t (with-tag t vec-ocr) 0 min-size )))
+                                          (assoc ocr-meta :bind-expr (with-tag t vec-ocr)))
                                  vr-ocr (gensym (str (name vec-ocr) "_right__"))
                                  vr-ocr (with-meta vr-ocr
-                                          (assoc ocr-meta :bind-expr (subvec-inline t (with-tag t vec-ocr) min-size)))]
+                                          (assoc ocr-meta :bind-expr (nthnext-inline t (with-tag t vec-ocr) min-size)))]
                              (into [vl-ocr vr-ocr] (drop-nth ocrs 0)))]
                           [(->> rows
                                 (map (fn [row]
@@ -1113,9 +1112,7 @@
                                                {:occurrence-type t
                                                 :vec-sym vec-ocr
                                                 :index i
-                                                :bind-expr (if-let [offset (.offset this)]
-                                                             (nth-offset-inline t (with-tag t vec-ocr) i offset)
-                                                             (nth-inline t (with-tag t vec-ocr) i))})))]
+                                                :bind-expr (nth-inline t (with-tag t vec-ocr) i)})))]
                              (into (into [] (map ocr-sym (range min-size)))
                                    (drop-nth ocrs 0)))])
           matrix (pattern-matrix nrows nocrs)]
