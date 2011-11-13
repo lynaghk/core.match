@@ -12,8 +12,6 @@
   (run-dispatch [this input])
   (patterns [this]))
 
-(declare sort-by-preference)
-
 (defn sort-dispatches* [dispatch-matrix]
   dispatch-matrix) ;; TODO plug back in logic sort
 
@@ -30,10 +28,9 @@
   (let [ps (conj dispatch-matrix default-dispatch)]
     (println ps)
     (some ;; TODO handle case where action returns falsy value
-      #(when (or (println "testing" %1)
-                 (= (:dispatch %1) :default)
+      #(when (or (= (:dispatch %1) :default)
                  (matches-pattern? (:dispatch %1) args))
-         ((:action %1)))  
+         (apply (:action %1) args))  
       ps)))
 
 
@@ -94,4 +91,4 @@
       [a]
       {:first a})
 
-;(run-dispatch test-disp [2])
+(run-dispatch test-disp [2])
