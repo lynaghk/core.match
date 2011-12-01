@@ -63,7 +63,7 @@
   *clojurescript* false)
 
 (def ^{:dynamic true} *line*)
-(def ^{:dynamic true} *locals*)
+(def ^{:dynamic true} *locals* nil)
 (def ^{:dynamic true} *warned*)
 (def ^{:dynamic true} *vector-type* ::vector)
 (def ^{:dynamic true} *match-breadcrumbs* [])
@@ -546,13 +546,19 @@
                         () ps)
                 reverse))
 
+          (collapse [ps]
+            (reduce (fn [a b]
+                      (if (pattern-equals (first (rseq a)) b)
+                        a
+                        (conj a b)))
+                    [] ps))
+
           (column-constructors 
-            ;; Returns a sorted-set of constructors in column i of matrix this
+            ;; Returns a vector of relevant constructors in column i of matrix this
             [this i]
-            (let [ps (group-vector-patterns (column this i))]
-             (->> ps
-                  (take-while (comp not wildcard-pattern?))
-                  (apply sorted-set-by (fn [a b] (pattern-compare a b))))))
+            (let [ps (group-vector-patterns (column this i))
+                  ps (take-while (comp not wildcard-pattern?) ps)]
+              (collapse ps)))
 
           (switch-clauses 
             ;; Compile a decision trees for each constructor cs and returns a clause list
@@ -827,7 +833,7 @@
   (toString [_]
     (if (nil? l)
       "nil"
-      (str l))))
+      (pr-str l))))
 
 (defn ^LiteralPattern literal-pattern [l] 
   (LiteralPattern. l nil))
@@ -941,6 +947,11 @@
 (declare map-pattern?)
 (declare guard-pattern)
 
+(defn key-compare [a b]
+    (if (= (type a) (type b))
+      (compare a b)
+      1))
+
 (deftype MapPattern [m _meta]
   clojure.lang.IObj
   (meta [_] _meta)
@@ -968,8 +979,7 @@
                                  [(set (keys (.m p)))
                                   (set only)])))
                         (reduce concat)
-                        (reduce set/union #{})
-                        sort) ;; NOTE: this assumes keys are of a homogenous type, can't sort #{1 :a} - David
+                        (reduce set/union #{}))
           wcs (repeatedly wildcard-pattern)
           wc-map (zipmap all-keys wcs)
           nrows (->> rows
@@ -986,7 +996,7 @@
                                                                            [{} wc-map])]
                                               (merge not-found-map wc-map m))
                                             wc-map)
-                                  ps (map second (sort ocr-map))
+                                  ps (map ocr-map all-keys)
                                   ps (if @only?
                                        (if only
                                          (let [a (with-meta (gensym) {:tag 'java.util.Map})]
@@ -1292,7 +1302,7 @@
 
 (defmulti emit-pattern 
   "Returns the corresponding pattern for the given syntax. Dispatches
-  on the class of its argument. For example, `[(1 | 2) 2]` is dispatched
+  on the class of its argument. For example, `[(:or 1 2) 2]` is dispatched
   as clojure.lang.IPersistentVector"
   class)
 
@@ -1353,36 +1363,38 @@
 
 (defmulti emit-pattern-for-syntax 
   "Handles patterns wrapped in the special list syntax. Dispatches
-  on the second item in the list. For example, the pattern `(1 :as a)`
-  is dispatched by :as."
-  (fn [syn] (second syn)))
+  on the first or second keyword in the list. For example, the pattern 
+  `(:or 1 ...) is dispatches as :or, and `(1 :as a)` is dispatched by :as."
+  (fn [[f s]]
+    (if (keyword? f)
+      [f (type s)]
+      [(type f) s])))
 
-(defmethod emit-pattern-for-syntax '|
+(defmethod emit-pattern-for-syntax [:or Object]
   [pat] (or-pattern
          (->> pat
-              (remove '#{|})
               (map emit-pattern)
               (into []))))
 
-(defmethod emit-pattern-for-syntax :as
+(defmethod emit-pattern-for-syntax [Object :as]
   [[p _ sym]] (with-meta (emit-pattern p) {:as sym}))
 
-(defmethod emit-pattern-for-syntax :when
+(defmethod emit-pattern-for-syntax [Object :when]
   [[p _ gs]] (let [gs (if (not (vector? gs)) [gs] gs)]
               (guard-pattern (emit-pattern p) (set gs))))
 
-(defmethod emit-pattern-for-syntax :seq
+(defmethod emit-pattern-for-syntax [Object :seq]
   [pat]
   (let [p (first pat)]
     (if (empty? p)
       (literal-pattern ())
       (seq-pattern (emit-patterns p :seq)))))
 
-(defmethod emit-pattern-for-syntax ::vector
+(defmethod emit-pattern-for-syntax [Object ::vector]
   [[p t]] (let [ps (emit-patterns p :vector)]
             (vector-pattern ps t (some rest-pattern? ps))))
 
-(defmethod emit-pattern-for-syntax :only
+(defmethod emit-pattern-for-syntax [Object :only]
   [[p _ only]] (with-meta (emit-pattern p) {:only only}))
 
 (defmethod emit-pattern-for-syntax :default
@@ -1397,33 +1409,26 @@
 (defn- pattern-keyword? [kw]
   (#{:when :as} kw))
 
-(defn- interpose1
-  "Like regular interpose, but guarantees that at least one interposing sep is used.  For example, (interpose1 'x '(1)) => (1 x)"
-  [sep coll]
-  (let [result (interpose sep coll)]
-    (cond (seq (rest result)) result
-          (not (seq result)) (list sep)
-          :else (list (first result) sep))))
-
 (let [void (gensym)]
-  ;; void is a unique placeholder for nothing -- we can't use nil because that's a legal symbol in a pattern row
+  ;; void is a unique placeholder for nothing -- we can't use nil
+  ;; because that's a legal symbol in a pattern row
   (defn- regroup-keywords [pattern]
     (cond (vector? pattern)
           (first (reduce (fn [[result p q] r]
-                           (cond (= void p) [result q r]
-                                 (and (not= void r) (pattern-keyword? q)) [(conj result (list (regroup-keywords p) q r)) void void]
-                                 :else [(conj result (regroup-keywords p)) q r]))
+                           (cond
+                            (= void p) [result q r]
+                            (and (not= void r) (pattern-keyword? q))
+                            [(conj result (list (regroup-keywords p) q r)) void void]
+                            :else [(conj result (regroup-keywords p)) q r]))
                          [[] void void]
                          (conj pattern void void)))
-          (seq? pattern) (if (= (second pattern) '|)
-                           (interpose1 '| (map regroup-keywords (take-nth 2 pattern)))
-                           (cons (regroup-keywords (first pattern)) (rest pattern)))
+          (seq? pattern) (cons (regroup-keywords (first pattern)) (rest pattern))
           :else pattern)))
 
  (defn- group-keywords 
-  "Returns a pattern with pattern-keywords (:when and :as) properly grouped.  The original pattern
-may use the 'flattened' syntax.  For example, a 'flattened' pattern row like [a b :when even?]
-is grouped as [a (b :when even?)]."
+   "Returns a pattern with pattern-keywords (:when and :as) properly grouped.  
+    The original pattern may use the 'flattened' syntax.  For example, a 'flattened' 
+    pattern row like [a b :when even?] is grouped as [a (b :when even?)]."
   [pattern]
   (if (vector? pattern) (regroup-keywords pattern) pattern))
 
@@ -1433,7 +1438,8 @@ is grouped as [a (b :when even?)]."
     (pattern-row p action)))
 
 (defn- wildcards-and-duplicates
-  "Returns a vector of two elements: the set of all wildcards and the set of duplicate wildcards.  The underbar _ is excluded from both."
+  "Returns a vector of two elements: the set of all wildcards and the 
+   set of duplicate wildcards.  The underbar _ is excluded from both."
   [patterns]
   (loop [remaining patterns seen #{} dups #{}]
     (if-let [patterns (seq remaining)]
@@ -1445,12 +1451,17 @@ is grouped as [a (b :when even?)]."
                               (recur pats (conj seen pat) dups))
               (vector? pat) (recur (concat pats pat) seen dups)
               (map? pat) (recur (concat pats (vals pat)) seen dups)
-              (seq? pat) (case (second pat)
-                           :as (recur (concat pats (take-nth 2 pat)) seen dups)
-                           | (let [wds (map wildcards-and-duplicates (map list (take-nth 2 pat)))
-                                   mseen (apply set/union (map first wds))]
-                               (recur pats (set/union seen mseen) (apply set/union dups (set/intersection seen mseen) (map second wds))))
-                           (recur (conj pats (first pat)) seen dups))
+              (seq? pat) (cond
+                          (= (first pat) 'quote) (recur pats seen dups)
+                          (= (first pat) :or) (let [wds (map wildcards-and-duplicates
+                                                             (map list (take-nth 2 pat)))
+                                                    mseen (apply set/union (map first wds))]
+                                                (recur pats (set/union seen mseen)
+                                                       (apply set/union dups
+                                                              (set/intersection seen mseen)
+                                                              (map second wds))))
+                          (= (second pat) :as) (recur (concat pats (take-nth 2 pat)) seen dups)
+                          :else (recur (conj pats (first pat)) seen dups))
               :else (recur pats seen dups)))
       [seen dups])))
 
@@ -1549,27 +1560,6 @@ is grouped as [a (b :when even?)]."
 ;; ============================================================================
 ;; # Match macros
 
-(defmacro match-1 
-  "Pattern match a single value. Clause question-answer syntax is like
-  `cond`.
-  
-  Example:
-  (let [x 1]
-    (match-1 x
-             1 :answer1
-             2 :answer2
-             :else :default-answer)))"
-  [vars & clauses]
-  (binding [*line* (-> &form meta :line)
-            *locals* (dissoc &env '_)
-            *warned* (atom false)]
-    (let [[vars clauses] [[vars] (mapcat (fn [[row action]]
-                                           (if (not= row :else)
-                                             [[row] action]
-                                             [row action]))
-                                         (partition 2 clauses))]]
-      `~(clj-form vars clauses))))
-
 (defmacro match 
   "Pattern match a row of occurrences. Take a vector of occurrences, vars.
   Clause question-answer syntax is like `cond`. Questions must be
@@ -1583,10 +1573,16 @@ is grouped as [a (b :when even?)]."
              [1 2 3] :answer1
              :else :default-answer))"
   [vars & clauses]
-  (binding [*line* (-> &form meta :line)
-            *locals* (dissoc &env '_)
-            *warned* (atom false)]
-    `~(clj-form vars clauses)))
+  (let [[vars clauses] (if (vector? vars)
+                         [vars clauses]
+                         [(vector vars)
+                          (mapcat (fn [[c a]]
+                                    [(if (not= c :else) (vector c) c) a])
+                                  (partition 2 clauses))])]
+   (binding [*line* (-> &form meta :line)
+             *locals* (dissoc &env '_)
+             *warned* (atom false)]
+     `~(clj-form vars clauses))))
 
 (defmacro matchv [type vars & clauses]
   (binding [*vector-type* type
@@ -1600,4 +1596,3 @@ is grouped as [a (b :when even?)]."
     `(let ~bindings
        (match [~@bindvars#]
          ~@body))))
-

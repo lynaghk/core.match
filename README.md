@@ -3,23 +3,26 @@ match
 
 An optimized pattern match and predicate dispatch library for Clojure. Currently the library only implements pattern matching. It supports Clojure 1.2.0 and later as well as ClojureScript.
 
+Contributing
+----
+
+No pull requests please. Please open tickets and submit patches to [JIRA](http://dev.clojure.org/jira/browse/MATCH)
+
+For simple fixes you can message [swannodette](http://github.com/swannodette). Thanks.
+
 Usage
 ----
 
 The fastest way to use this library is with Leiningen or Cake. Add the following to your project.clj dependencies:
 
 ```clojure
-[org.clojure/core.match "0.2.0-alpha5"]
+[org.clojure/core.match "0.2.0-alpha7"]
 ```
 
 Use via:
 
 ```clojure
-;; when using HEAD
 (use '[clojure.core.match :only [match]])
-
-;; when using the latest released alpha
-(use '[clojure.core.match.core :only [match]])
 ```
 
 ClojureScript
@@ -129,10 +132,10 @@ It's simple to extend match to support primitive arrays so you can write the fol
 ```clojure
 (defn balance [^objects node]
   (matchv ::objects [node]
-    [([:black [:red [:red a x b] y c] z d] |
-      [:black [:red a x [:red b y c]] z d] |
-      [:black a x [:red [:red b y c] z d]] |
-      [:black a x [:red b y [:red c z d]]])] (R (B a x b) y (B c z d))))
+    [(:or [:black [:red [:red a x b] y c] z d]
+          [:black [:red a x [:red b y c]] z d]
+          [:black a x [:red [:red b y c] z d]]
+          [:black a x [:red b y [:red c z d]]])] (R (B a x b) y (B c z d))))
 ```
 
 See <code>match.array</code> for some ideas.
@@ -198,14 +201,14 @@ Or patterns are supported anywhere you would use a pattern:
 ```clojure
 (let [x '(1 2 3)]
   (match [x]
-    [[1 (3 | 4) 3]] :a0
-    [[1 (2 | 3) 3]] :a1))
+    [[1 (:or 3 4) 3]] :a0
+    [[1 (:or 2 3) 3]] :a1))
 ;; => :a1
     
 (let [x {:a 3}]
   (match [x]
-    [{:a (1 | 2)}] :a0
-    [{:a (3 | 4)}] :a1))
+    [{:a (:or 1 2)}] :a0
+    [{:a (:or 3 4)}] :a1))
 ;; => :a1
 ```
 
@@ -232,7 +235,7 @@ Sometimes you'd like capture a part of the match with a binding:
   (match [v]
     [[[3 1]]] :a0
     [[([1 a] :as b)]] [:a1 a b]))
-;; => [:a1 1 [1 2]]
+;; => [:a1 2 [1 2]]
 ```
 
 Java Interop
@@ -255,7 +258,7 @@ By extending Java types to IMatchLookup, Java types can participate in map patte
 (let [d (java.util.Date. 2010 10 1 12 30)]
   (match [d]
     [{:year 2009 :month a}] [:a0 a]
-    [{:year (2010 | 2011) :month b}] [:a1 b]))
+    [{:year (:or 2010 2011) :month b}] [:a1 b]))
 ;; => [:a1 10]
 ```
 
@@ -285,31 +288,18 @@ For example, this syntax is illegal:
 Matching single variables
 ---
 
-`clojure.core.match/match-1` is sugar over `match` that allows pattern matching over a single variable, without
-an "extra" pair of `[]` around the occurrences and each pattern row.
+Matching single variables is simple:
 
 ```clojure
 (let [x 3]
-  (match-1 x
-           1 :a0
-           2 :a1
-           :else :a2))
+  (match x
+    1 :a0
+    2 :a1
+    :else :a2))
 ;=> :a2
 ```
 
-This is equivalent to the following `match`.
-
-```clojure
-(let [x 3]
-  (match [x]
-         [1] :a0
-         [2] :a1
-         :else :a2))
-;=> :a2
-```
-
-As shown, :else clauses are special, in that they are not implicitely wrapped in `[]`.
-
+Note that <code>:else</code> clauses are special and never need to be wrapped.
 
 Road Map
 ----

@@ -133,8 +133,8 @@
 (deftest or-pattern-match-1
   (is (= (let [x 4 y 6 z 9]
            (match [x y z]
-             [(1 | 2 | 3) _ _] :a0
-             [4 (5 | 6 | 7) _] :a1
+             [(:or 1 2 3) _ _] :a0
+             [4 (:or 5 6 7) _] :a1
              :else []))
          :a1)))
 
@@ -143,8 +143,8 @@
                y nil
                z nil]
            (match [x y z]
-             [([1 (3 | 4) 3] :seq) _ _] :a0
-             [([1 (2 | 3) 3] :seq) _ _] :a1
+             [([1 (:or 3 4) 3] :seq) _ _] :a0
+             [([1 (:or 2 3) 3] :seq) _ _] :a1
              :else []))
          :a1)))
 
@@ -153,8 +153,8 @@
                y nil
                z nil]
            (match [x y z]
-             [{:a (1 | 2)} _ _] :a0
-             [{:a (3 | 4)} _ _] :a1
+             [{:a (:or 1 2)} _ _] :a0
+             [{:a (:or 3 4)} _ _] :a1
              :else []))
          :a1)))
 
@@ -196,6 +196,36 @@
              :else :fail))
          :success)))
 
+(deftest same-symbol-using-guards
+  (is (=  (let [e '(+ 1 (+ 2 3))
+                op (first e)
+                op? #(= % op)]
+            (match [e]
+                   [([p :when op? x ([p2 :when op? y z] :seq)] :seq)] (list p x y z)))
+          '(+ 1 2 3))))
+
+(deftest quoted-symbol
+  (is (=  (let [e '(+ 1 (+ 2 3))]
+            (match [e]
+                   [(['+ x (['+ y z] :seq)] :seq)] (list '+ x y z)))
+          '(+ 1 2 3))))
+
+(deftest literal-quote
+  (is (=  (let [e 'quote
+                f 10]
+            (match [e f]
+                   ['quote quote] quote))
+          10)))
+
+
+(deftest literal-quote-seq
+  (is (=  (let [e '(:a (quote 10))]
+            (match [e]
+                   [([quote (['quote 10] :seq)] :seq)] quote))
+          :a)))
+
+
+
 (extend-type java.util.Date
   IMatchLookup
   (val-at* [this k not-found]
@@ -211,7 +241,7 @@
   (is (= (let [d (java.util.Date. 2010 10 1 12 30)]
            (match [d]
              [{:year 2009 :month a}] [:a0 a]
-             [{:year (2010 | 2011) :month b}] [:a1 b]
+             [{:year (:or 2010 2011) :month b}] [:a1 b]
              :else []))
          [:a1 10])))
 
@@ -262,7 +292,7 @@
 (deftest else-clause-or-pattern-1
   (is (= (let [v 3]
            (match [v]
-                  [(1 | 2)] :a0
+                  [(:or 1  2)] :a0
                   :else :a1))
          :a1)))
 
@@ -278,7 +308,7 @@
 
 (deftest match-single-1
   (is (= (let [x 3]
-           (match-1 x
+           (match x
              1 :a0
              2 :a1
              :else :a2))
@@ -286,7 +316,7 @@
 
 (deftest match-single-2
   (is (= (let [x 3]
-           (match-1 (mod x 2)
+           (match (mod x 2)
              1 :a0
              2 :a1
              :else :a2))
@@ -296,7 +326,7 @@
 ;; whatever pattern they actually contain - David
 (comment
   (deftest match-single-3
-    (is (= (match-1 [1 2] 
+    (is (= (match [1 2] 
              [2 1] :a0 
              (_ :when #(= (count %) 2)) :a1
              :else :a2)
@@ -338,7 +368,7 @@
 (deftest test-lazy-source-case-1
   (is (= (let [x [1 2]]
            (match [x] 
-              [([1 2] | [3 4] | [5 6] | [7 8] | [9 10])] :a0
+              [(:or [1 2] [3 4] [5 6] [7 8] [9 10])] :a0
               :else (throw (Exception. "Shouldn't be here"))))
          :a0)))
 
@@ -365,10 +395,10 @@
 (deftest red-black-tree-pattern-1
   (is (= (let [n [:black [:red [:red 1 2 3] 3 4] 5 6]]
            (match [n]
-             [([:black [:red [:red a x b] y c] z d] |
-               [:black [:red a x [:red b y c]] z d] |
-               [:black a x [:red [:red b y c] z d]] |
-               [:black a x [:red b y [:red c z d]]])] :balance
+             [(:or [:black [:red [:red a x b] y c] z d]
+                   [:black [:red a x [:red b y c]] z d]
+                   [:black a x [:red [:red b y c] z d]]
+                   [:black a x [:red b y [:red c z d]]])] :balance
              :else :valid))
          :balance)))
 
@@ -469,9 +499,16 @@
                   :else :a1))
               :a1))))
 
+(deftest map-pattern-heterogenous-keys-1
+  (is (= (let [m {:foo 1 "bar" 2}]
+           (match [m]
+             [{:foo 1 "bar" 2}] :a0
+             :else :a1))
+         :a0)))
+
 (deftest exception-1
   (is (= (try
-           (match-1 :a :a (throw (Exception.)) :else :c)
+           (match :a :a (throw (Exception.)) :else :c)
            (catch Exception e
              :d))
          :d)))
@@ -516,10 +553,11 @@
              :else :a4))
          :a3)))
 
-(comment
-  ;; TODO: should not match - David
-  (let [l '(1 2 3)]
-    (match [l]
-      [([a & [b & [c d]]] :seq)] :a0
-      :else :a1))
-  )
+(deftest match-order-5
+  (is (= (match [["foo"]]
+           [["foo"]] :a0
+           [["foo" a]] :a1
+           [["baz"]] :a2
+           [["baz" a b]] :a3
+           :else :a4)
+         :a0)))
