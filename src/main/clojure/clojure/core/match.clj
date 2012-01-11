@@ -1434,8 +1434,13 @@
   [[p _ sym]] (with-meta (emit-pattern p) {:as sym}))
 
 (defmethod emit-pattern-for-syntax [Object :when]
-  [[p _ gs]] (let [gs (if (not (vector? gs)) [gs] gs)]
-              (guard-pattern (emit-pattern p) (set gs))))
+  [[p _ gs]]
+  (cond
+   (symbol? gs) nil
+   (vector? gs) (assert (every? symbol? gs))
+   :else (throw (AssertionError. "Anonymous functions and function literals are not suppported as guards")))
+  (let [gs (if (not (vector? gs)) [gs] gs)]
+    (guard-pattern (emit-pattern p) (set gs))))
 
 (defmethod emit-pattern-for-syntax [Object :seq]
   [pat]
