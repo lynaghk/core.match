@@ -135,8 +135,15 @@
   ([m k not-found] (val-at m k not-found)))
 
 (defn val-at-expr [& args]
-  (if *clojurescript*
-    `(get ~@args)
+  (if *clojurescript* ;;then we need to inline the correct behavior
+    (if (= 3 (count args))
+      `(get ~@args)
+      (let [[m k] args]
+        `(let [val# (get ~m ~k ::not-found)]
+           (if (= val# ::not-found)
+             (throw 0)
+             val#))))
+    ;;If not ClojureScript, defer to val-at*
     `(val-at* ~@args)))
 
 ;; =============================================================================
